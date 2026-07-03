@@ -96,7 +96,15 @@ def run_agent(client: dict, api_key: str, model: str):
         #    step=step + 1).
         #
         # TODO: call call_model(...) and yield the reasoning text if present
-        turn = None  # <-- replace this
+        turn = call_model(api_key, model, system_prompt, messages)
+
+        reasoning_text = turn.get("text", "")
+        if reasoning_text:
+            yield {
+                "type": "reasoning",
+                "content": reasoning_text,
+                "step": step + 1,
+            }
 
         # 2. Did the model decide it's done, or does it want to ACT (call a
         #    tool)? Check turn["tool_calls"]. If it's empty, the model is
@@ -104,6 +112,14 @@ def run_agent(client: dict, api_key: str, model: str):
         #    return from the generator (stop the loop).
         #
         # TODO: if there are no tool calls, yield final and return
+        tool_calls = turn.get("tool_calls", [])
+        if not tool_calls:
+            yield {
+                "type": "final",
+                "content": reasoning_text,
+                "step": step + 1,
+            }
+            return
 
         # 3. ACT: for each requested tool call in turn["tool_calls"], pull out
         #    its arguments (tool_call["arguments"]), yield a "tool_call" log
@@ -120,8 +136,38 @@ def run_agent(client: dict, api_key: str, model: str):
         # TODO: loop over turn["tool_calls"], run each tool, yield tool_call
         #       and tool_result entries, and extend `messages` with the
         #       result messages
+        for tool_call in tool_calls:
+            arguments = tool_call["arguments"]
 
-        pass  # <-- remove this once you've filled in steps 3-4
+            yield {
+                "type": "tool_call",
+                "content": arguments,
+                "step": step + 1,
+            }
+
+            result = run_full_simulation(
+                current_age=client["age"],
+                risk_tolerance=client["risk_tolerance"],
+                target_age=arguments["retirement_age"],
+                target_amount=client["target_amount"],
+                current_savings=client["current_savings"],
+                monthly_contribution=arguments["monthly_contribution"],
+                n_trials=client["n_trials"],
+            )
+
+            yield {
+                "type": "tool_result",
+                "content": result,
+                "step": step + 1,
+            }
+
+            messages.extend(
+                build_tool_result_messages(
+                    turn["raw_assistant_message"],
+                    tool_call["id"],
+                    result,
+                )
+            )
 
         # 5. REPEAT: loop back to step 1 with the updated conversation history.
         #    (No code needed here — this just happens because it's a `for` loop.)
@@ -134,7 +180,6 @@ def run_agent(client: dict, api_key: str, model: str):
         ),
         "step": MAX_AGENT_STEPS,
     }
-
 
 # ----------------------------------------------------------------------------
 # Streamlit UI
